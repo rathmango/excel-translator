@@ -21,7 +21,7 @@ pip install openai openpyxl tqdm
 
 2. 스크립트 실행:
 ```
-python translator_new.py
+python excel-translator.py
 ```
 
 3. 프롬프트에 따라 입력:
