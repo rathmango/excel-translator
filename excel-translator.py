@@ -126,7 +126,8 @@ def has_target_language(text, lang_code, target_lang=None):
         return False
     
     # 숫자만 있는 경우 번역 대상에서 제외
-    if isinstance(text, str) and re.match(r'^[\d,.\s-]+$', text.strip()):
+    # 숫자와 특수 기호(%, $, ₩, €, £, ¥ 등)만 있는 경우도 제외
+    if isinstance(text, str) and re.match(r'^[\d,.\s\-\%\$\₩\€\£\¥]+$', text.strip()):
         return False
     
     # 'any' 코드인 경우, 대상 언어와 다른 언어인지 확인
