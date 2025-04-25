@@ -1,10 +1,14 @@
 import openai
-from openpyxl import load_workbook
+from openpyxl import load_workbook, Workbook
+import pandas as pd
 import os
 import json
 from tqdm import tqdm
 import re
 import logging
+import inquirer
+from inquirer import errors
+import csv
 
 # 로깅 설정
 logging.basicConfig(
@@ -18,11 +22,167 @@ logging.basicConfig(
 
 # API 키는 실행 시 입력받습니다
 
+# 지원되는 언어 목록 (ISO 코드와 이름)
+SUPPORTED_LANGUAGES = [
+    ('af', 'Afrikaans'),
+    ('sq', 'Albanian'),
+    ('am', 'Amharic'),
+    ('ar', 'Arabic'),
+    ('hy', 'Armenian'),
+    ('az', 'Azerbaijani'),
+    ('eu', 'Basque'),
+    ('be', 'Belarusian'),
+    ('bn', 'Bengali'),
+    ('bs', 'Bosnian'),
+    ('bg', 'Bulgarian'),
+    ('ca', 'Catalan'),
+    ('ceb', 'Cebuano'),
+    ('ny', 'Chichewa'),
+    ('zh-CN', 'Chinese (Simplified)'),
+    ('zh-TW', 'Chinese (Traditional)'),
+    ('co', 'Corsican'),
+    ('hr', 'Croatian'),
+    ('cs', 'Czech'),
+    ('da', 'Danish'),
+    ('nl', 'Dutch'),
+    ('en', 'English'),
+    ('eo', 'Esperanto'),
+    ('et', 'Estonian'),
+    ('tl', 'Filipino'),
+    ('fi', 'Finnish'),
+    ('fr', 'French'),
+    ('fy', 'Frisian'),
+    ('gl', 'Galician'),
+    ('ka', 'Georgian'),
+    ('de', 'German'),
+    ('el', 'Greek'),
+    ('gu', 'Gujarati'),
+    ('ht', 'Haitian Creole'),
+    ('ha', 'Hausa'),
+    ('haw', 'Hawaiian'),
+    ('iw', 'Hebrew'),
+    ('hi', 'Hindi'),
+    ('hmn', 'Hmong'),
+    ('hu', 'Hungarian'),
+    ('is', 'Icelandic'),
+    ('ig', 'Igbo'),
+    ('id', 'Indonesian'),
+    ('ga', 'Irish'),
+    ('it', 'Italian'),
+    ('ja', 'Japanese'),
+    ('jw', 'Javanese'),
+    ('kn', 'Kannada'),
+    ('kk', 'Kazakh'),
+    ('km', 'Khmer'),
+    ('rw', 'Kinyarwanda'),
+    ('ko', 'Korean'),
+    ('ku', 'Kurdish'),
+    ('ky', 'Kyrgyz'),
+    ('lo', 'Lao'),
+    ('la', 'Latin'),
+    ('lv', 'Latvian'),
+    ('lt', 'Lithuanian'),
+    ('lb', 'Luxembourgish'),
+    ('mk', 'Macedonian'),
+    ('mg', 'Malagasy'),
+    ('ms', 'Malay'),
+    ('ml', 'Malayalam'),
+    ('mt', 'Maltese'),
+    ('mi', 'Maori'),
+    ('mr', 'Marathi'),
+    ('mn', 'Mongolian'),
+    ('my', 'Myanmar (Burmese)'),
+    ('ne', 'Nepali'),
+    ('no', 'Norwegian'),
+    ('or', 'Odia (Oriya)'),
+    ('ps', 'Pashto'),
+    ('fa', 'Persian'),
+    ('pl', 'Polish'),
+    ('pt', 'Portuguese'),
+    ('pa', 'Punjabi'),
+    ('ro', 'Romanian'),
+    ('ru', 'Russian'),
+    ('sm', 'Samoan'),
+    ('gd', 'Scots Gaelic'),
+    ('sr', 'Serbian'),
+    ('st', 'Sesotho'),
+    ('sn', 'Shona'),
+    ('sd', 'Sindhi'),
+    ('si', 'Sinhala'),
+    ('sk', 'Slovak'),
+    ('sl', 'Slovenian'),
+    ('so', 'Somali'),
+    ('es', 'Spanish'),
+    ('su', 'Sundanese'),
+    ('sw', 'Swahili'),
+    ('sv', 'Swedish'),
+    ('tg', 'Tajik'),
+    ('ta', 'Tamil'),
+    ('tt', 'Tatar'),
+    ('te', 'Telugu'),
+    ('th', 'Thai'),
+    ('tr', 'Turkish'),
+    ('tk', 'Turkmen'),
+    ('uk', 'Ukrainian'),
+    ('ur', 'Urdu'),
+    ('ug', 'Uyghur'),
+    ('uz', 'Uzbek'),
+    ('vi', 'Vietnamese'),
+    ('cy', 'Welsh'),
+    ('xh', 'Xhosa'),
+    ('yi', 'Yiddish'),
+    ('yo', 'Yoruba'),
+    ('zu', 'Zulu')
+]
+
 def has_korean(text):
     if not isinstance(text, str) or not text.strip():
         return False
     # 한글 유니코드 범위
     return bool(re.search('[\uac00-\ud7af]', text))
+
+def has_target_language(text, lang_code):
+    """
+    지정된 언어가 텍스트에 포함되어 있는지 확인
+    현재는 한국어만 지원하며 추후 확장 가능
+    """
+    if lang_code == 'ko':
+        return has_korean(text)
+    # 다른 언어 감지 기능은 필요에 따라 추가
+    return False
+
+def validate_language_choice(answers, current):
+    if not current:
+        raise errors.ValidationError('', reason='언어를 선택해야 합니다')
+    return True
+
+def select_language(message, default_language=None):
+    """
+    사용자에게 언어 선택 인터페이스 제공
+    """
+    # 키워드 검색을 위한 처리
+    formatted_choices = [f"{code} ({name})" for code, name in SUPPORTED_LANGUAGES]
+    default_index = None
+    
+    if default_language:
+        for i, (code, name) in enumerate(SUPPORTED_LANGUAGES):
+            if code == default_language or name == default_language:
+                default_index = i
+                break
+    
+    questions = [
+        inquirer.List('language',
+                      message=message,
+                      choices=formatted_choices,
+                      default=formatted_choices[default_index] if default_index is not None else None,
+                      validate=validate_language_choice),
+    ]
+    
+    answers = inquirer.prompt(questions)
+    selected = answers['language']
+    # "ko (Korean)" 형태에서 코드 추출
+    lang_code = selected.split(' ')[0]
+    return lang_code
 
 def batch_translate(contents, src, tgt, grocery=None, max_retry=3):
     """
@@ -202,27 +362,77 @@ def batch_translate(contents, src, tgt, grocery=None, max_retry=3):
     logging.warning("Returning original text with error markers as fallback")
     return [f"[ERROR] {text}" for text in contents]
 
+def load_file(input_file):
+    """
+    파일 확장자에 따라 적절한 로더 사용
+    지원 형식: xlsx, csv
+    """
+    ext = os.path.splitext(input_file)[1].lower()
+    
+    if ext == '.xlsx':
+        logging.info(f"Loading Excel file: {input_file}")
+        return load_workbook(input_file), None, 'excel'
+    elif ext == '.csv':
+        logging.info(f"Loading CSV file: {input_file}")
+        # CSV는 pandas로 읽고 데이터프레임으로 처리
+        df = pd.read_csv(input_file)
+        return None, df, 'csv'
+    else:
+        raise ValueError(f"Unsupported file format: {ext}. Please use .xlsx or .csv files.")
+
+def save_file(data, output_file, file_type):
+    """
+    파일 형식에 맞게 저장
+    """
+    ext = os.path.splitext(output_file)[1].lower()
+    
+    if file_type == 'excel':
+        # Excel 워크북 객체를 저장
+        data.save(output_file)
+        logging.info(f"Excel file saved: {output_file}")
+    elif file_type == 'csv':
+        # DataFrame을 CSV로 저장
+        data.to_csv(output_file, index=False)
+        logging.info(f"CSV file saved: {output_file}")
+    
+    return output_file
+
 def main():
     # API 키 입력 받기
     api_key = input("OpenAI API 키를 입력하세요: ").strip()
     openai.api_key = api_key
 
-    input_file = input("Enter the path to the Excel file to translate: ").strip().replace("'", "").replace('"', '')
+    # 파일 경로 입력
+    input_file = input("번역할 파일 경로를 입력하세요 (xlsx, csv 지원): ").strip().replace("'", "").replace('"', '')
     if not os.path.isfile(input_file):
         logging.error(f"File not found: {input_file}")
-        print("File not found.")
+        print("파일을 찾을 수 없습니다.")
         return
+    
+    # 언어 선택 드롭다운 메뉴
+    print("\n원본 언어를 선택하세요:")
+    source_lang = select_language("원본 언어 선택", "ko")  # 기본값으로 한국어 설정
+    
+    print("\n대상 언어를 선택하세요:")
+    target_lang = select_language("대상 언어 선택", "en")  # 기본값으로 영어 설정
 
-    source_lang = input("Enter the source language code (e.g. Korean): ").strip()
-    target_lang = input("Enter the target language code (e.g. English): ").strip()
-    output_file = os.path.splitext(input_file)[0] + f"_batched_translated_{target_lang}.xlsx"
+    # 선택된 언어 코드에 해당하는 언어 이름 찾기
+    source_lang_name = next((name for code, name in SUPPORTED_LANGUAGES if code == source_lang), source_lang)
+    target_lang_name = next((name for code, name in SUPPORTED_LANGUAGES if code == target_lang), target_lang)
+    
+    # 출력 파일 이름 설정
+    output_file = os.path.splitext(input_file)[0] + f"_translated_{target_lang}{os.path.splitext(input_file)[1]}"
 
     logging.info(f"Starting translation: {input_file}")
-    logging.info(f"Source language: {source_lang}, Target language: {target_lang}")
+    logging.info(f"Source language: {source_lang} ({source_lang_name}), Target language: {target_lang} ({target_lang_name})")
 
-    wb = load_workbook(input_file)
-    total_sheets = len(wb.worksheets)
-    logging.info(f"Found {total_sheets} sheets")
+    # 파일 로드
+    try:
+        wb, df, file_type = load_file(input_file)
+    except ValueError as e:
+        logging.error(str(e))
+        print(str(e))
+        return
     
     # 용어 사전(grocery) 초기화 - 원본 텍스트를 키로, 번역된 텍스트를 값으로 저장
     translation_grocery = {}
@@ -230,68 +440,202 @@ def main():
     # 용어 사전 로그 파일 설정
     grocery_file = os.path.splitext(input_file)[0] + "_translation_grocery.json"
     
-    # 모든 시트의 총 번역 대상 항목 수와 사전 덕분에 절약한 항목 수 추적
+    # 모든 시트/데이터의 총 번역 대상 항목 수와 사전 덕분에 절약한 항목 수 추적
     total_items = 0
     total_saved = 0
 
-    for ws_idx, ws in enumerate(wb.worksheets):
-        logging.info(f"Processing sheet: {ws.title} ({ws_idx+1}/{total_sheets})")
-        print(f"\n[{ws.title}] ({ws_idx+1}/{total_sheets}) -- Extracting Korean text for batch translation...")
+    if file_type == 'excel':
+        # Excel 파일 처리
+        total_sheets = len(wb.worksheets)
+        logging.info(f"Found {total_sheets} sheets")
+        
+        for ws_idx, ws in enumerate(wb.worksheets):
+            logging.info(f"Processing sheet: {ws.title} ({ws_idx+1}/{total_sheets})")
+            print(f"\n[{ws.title}] ({ws_idx+1}/{total_sheets}) -- {source_lang_name} 텍스트 추출 중...")
+            targets = []
+            grocery_hits = []  # 사전에서 찾은 항목 저장
+            
+            for row in ws.iter_rows():
+                for cell in row:
+                    if has_target_language(cell.value, source_lang):
+                        content = cell.value.strip()
+                        # 사전에 있는지 확인
+                        if content in translation_grocery:
+                            grocery_hits.append({
+                                "Sheet": ws.title,
+                                "Cell": cell.coordinate,
+                                "Content": content,
+                                "Translated": translation_grocery[content]
+                            })
+                        else:
+                            targets.append({
+                                "Sheet": ws.title,
+                                "Cell": cell.coordinate,
+                                "Content": content
+                            })
+
+            if not targets and not grocery_hits:
+                logging.info(f"No {source_lang_name} text found in sheet '{ws.title}'. Skipping.")
+                print(f"  No {source_lang_name} text found in [{ws.title}]. Skipping.")
+                continue
+            
+            # 사전 히트 통계
+            sheet_total = len(targets) + len(grocery_hits)
+            sheet_saved = len(grocery_hits)
+            total_items += sheet_total
+            total_saved += sheet_saved
+            
+            logging.info(f"Sheet '{ws.title}': {sheet_total} total items, {sheet_saved} reused from grocery ({sheet_saved/sheet_total*100:.1f}% saved)")
+            print(f"  {sheet_total} total items, {sheet_saved} reused from grocery ({sheet_saved/sheet_total*100:.1f}% saved)")
+            
+            # 사전에서 찾은 항목들은 즉시 적용
+            for hit in grocery_hits:
+                ws[hit["Cell"]] = hit["Translated"]
+            
+            # 나머지는 API로 번역
+            if targets:
+                contents = [item["Content"] for item in targets]
+                logging.info(f"Found {len(contents)} items to translate in sheet '{ws.title}'")
+                print(f"  {len(contents)} items to translate in sheet '{ws.title}'.")
+
+                try:
+                    translated = batch_translate(contents, source_lang_name, target_lang_name, translation_grocery)
+                    # 오류 표시 항목 개수 확인
+                    error_count = sum(1 for item in translated if isinstance(item, str) and item.startswith("[ERROR]"))
+                    if error_count > 0:
+                        logging.warning(f"{error_count} items could not be translated and were marked with [ERROR]")
+                except Exception as e:
+                    logging.error(f"Error during translation on sheet '{ws.title}': {str(e)}")
+                    print(f"Error during translation on sheet [{ws.title}]: {e}")
+                    return
+
+                # 번역 결과 길이 체크 및 조정 - batch_translate 함수에서 처리되었으므로 여기서는 검증만
+                if len(translated) != len(contents):
+                    logging.error(f"Critical error: translated length {len(translated)} != contents length {len(contents)}")
+                    translated = translated[:len(contents)] if len(translated) > len(contents) else translated + ["[TRANSLATION ERROR]"] * (len(contents) - len(translated))
+
+                # 번역 결과를 사전에 추가
+                for i, content in enumerate(contents):
+                    translation_grocery[content] = translated[i]
+                
+                # 사전 상태 저장 (매 시트 처리마다 업데이트)
+                with open(grocery_file, "w", encoding="utf-8") as f:
+                    json.dump(translation_grocery, f, ensure_ascii=False, indent=2)
+                    logging.info(f"Updated translation grocery with {len(translation_grocery)} items")
+
+                # Save translation map as JSON
+                json_path = os.path.splitext(input_file)[0] + f"_{ws.title}_translation_map.json"
+                
+                # targets와 grocery_hits 모두 포함한 전체 맵 생성
+                translation_map = [
+                    {
+                        "Sheet": targets[i]["Sheet"],
+                        "Cell": targets[i]["Cell"],
+                        "Content": targets[i]["Content"],
+                        "Translated": translated[i],
+                        "Source": "API"
+                    } for i in range(len(contents))
+                ] + [
+                    {
+                        "Sheet": hit["Sheet"],
+                        "Cell": hit["Cell"],
+                        "Content": hit["Content"],
+                        "Translated": hit["Translated"],
+                        "Source": "Grocery"
+                    } for hit in grocery_hits
+                ]
+                
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(translation_map, f, ensure_ascii=False, indent=2)
+                    logging.info(f"Translation map saved: {json_path}")
+                    print(f"  Translation map saved to: {json_path}")
+
+                # Apply translations to Excel
+                for idx, t in enumerate(targets):
+                    if idx < len(translated):
+                        ws[t["Cell"]] = translated[idx]
+                    else:
+                        ws[t["Cell"]] = "[TRANSLATION ERROR]"
+                        logging.error(f"Index error: {idx} is out of range in translated array")
+            
+            # 사전에서만 찾아서 번역한 경우 맵 저장
+            elif grocery_hits:
+                json_path = os.path.splitext(input_file)[0] + f"_{ws.title}_translation_map.json"
+                translation_map = [
+                    {
+                        "Sheet": hit["Sheet"],
+                        "Cell": hit["Cell"],
+                        "Content": hit["Content"],
+                        "Translated": hit["Translated"],
+                        "Source": "Grocery"
+                    } for hit in grocery_hits
+                ]
+                
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(translation_map, f, ensure_ascii=False, indent=2)
+                    logging.info(f"Translation map saved: {json_path}")
+                    print(f"  Translation map saved to: {json_path} (100% from grocery)")
+        
+        # 번역된 Excel 파일 저장
+        save_file(wb, output_file, 'excel')
+    
+    elif file_type == 'csv':
+        # CSV 파일 처리
+        print(f"\nCSV 파일 처리 중... {source_lang_name} 텍스트 추출 중...")
         targets = []
         grocery_hits = []  # 사전에서 찾은 항목 저장
         
-        for row in ws.iter_rows():
-            for cell in row:
-                if has_korean(cell.value):
-                    content = cell.value.strip()
+        # 데이터프레임 순회하며 번역 대상 찾기
+        for col in df.columns:
+            for idx, value in enumerate(df[col]):
+                if has_target_language(value, source_lang):
+                    content = str(value).strip()
                     # 사전에 있는지 확인
                     if content in translation_grocery:
                         grocery_hits.append({
-                            "Sheet": ws.title,
-                            "Cell": cell.coordinate,
+                            "Row": idx,
+                            "Column": col,
                             "Content": content,
                             "Translated": translation_grocery[content]
                         })
                     else:
                         targets.append({
-                            "Sheet": ws.title,
-                            "Cell": cell.coordinate,
+                            "Row": idx,
+                            "Column": col,
                             "Content": content
                         })
-
+        
         if not targets and not grocery_hits:
-            logging.info(f"No Korean text found in sheet '{ws.title}'. Skipping.")
-            print(f"  No Korean text found in [{ws.title}]. Skipping.")
-            continue
+            logging.info(f"No {source_lang_name} text found in CSV file. Skipping.")
+            print(f"  No {source_lang_name} text found in CSV file. Skipping.")
+            return
         
         # 사전 히트 통계
-        sheet_total = len(targets) + len(grocery_hits)
-        sheet_saved = len(grocery_hits)
-        total_items += sheet_total
-        total_saved += sheet_saved
+        total_items = len(targets) + len(grocery_hits)
+        total_saved = len(grocery_hits)
         
-        logging.info(f"Sheet '{ws.title}': {sheet_total} total items, {sheet_saved} reused from grocery ({sheet_saved/sheet_total*100:.1f}% saved)")
-        print(f"  {sheet_total} total items, {sheet_saved} reused from grocery ({sheet_saved/sheet_total*100:.1f}% saved)")
+        logging.info(f"CSV file: {total_items} total items, {total_saved} reused from grocery ({total_saved/total_items*100:.1f}% saved)")
+        print(f"  {total_items} total items, {total_saved} reused from grocery ({total_saved/total_items*100:.1f}% saved)")
         
         # 사전에서 찾은 항목들은 즉시 적용
         for hit in grocery_hits:
-            ws[hit["Cell"]] = hit["Translated"]
+            df.at[hit["Row"], hit["Column"]] = hit["Translated"]
         
         # 나머지는 API로 번역
         if targets:
             contents = [item["Content"] for item in targets]
-            logging.info(f"Found {len(contents)} items to translate in sheet '{ws.title}'")
-            print(f"  {len(contents)} items to translate in sheet '{ws.title}'.")
+            logging.info(f"Found {len(contents)} items to translate in CSV file")
+            print(f"  {len(contents)} items to translate in CSV file.")
 
             try:
-                translated = batch_translate(contents, source_lang, target_lang, translation_grocery)
+                translated = batch_translate(contents, source_lang_name, target_lang_name, translation_grocery)
                 # 오류 표시 항목 개수 확인
                 error_count = sum(1 for item in translated if isinstance(item, str) and item.startswith("[ERROR]"))
                 if error_count > 0:
                     logging.warning(f"{error_count} items could not be translated and were marked with [ERROR]")
             except Exception as e:
-                logging.error(f"Error during translation on sheet '{ws.title}': {str(e)}")
-                print(f"Error during translation on sheet [{ws.title}]: {e}")
+                logging.error(f"Error during translation on CSV file: {str(e)}")
+                print(f"Error during translation on CSV file: {e}")
                 return
 
             # 번역 결과 길이 체크 및 조정 - batch_translate 함수에서 처리되었으므로 여기서는 검증만
@@ -303,27 +647,27 @@ def main():
             for i, content in enumerate(contents):
                 translation_grocery[content] = translated[i]
             
-            # 사전 상태 저장 (매 시트 처리마다 업데이트)
+            # 사전 상태 저장
             with open(grocery_file, "w", encoding="utf-8") as f:
                 json.dump(translation_grocery, f, ensure_ascii=False, indent=2)
                 logging.info(f"Updated translation grocery with {len(translation_grocery)} items")
 
             # Save translation map as JSON
-            json_path = os.path.splitext(input_file)[0] + f"_{ws.title}_translation_map.json"
+            json_path = os.path.splitext(input_file)[0] + "_translation_map.json"
             
             # targets와 grocery_hits 모두 포함한 전체 맵 생성
             translation_map = [
                 {
-                    "Sheet": targets[i]["Sheet"],
-                    "Cell": targets[i]["Cell"],
+                    "Row": targets[i]["Row"],
+                    "Column": targets[i]["Column"],
                     "Content": targets[i]["Content"],
                     "Translated": translated[i],
                     "Source": "API"
                 } for i in range(len(contents))
             ] + [
                 {
-                    "Sheet": hit["Sheet"],
-                    "Cell": hit["Cell"],
+                    "Row": hit["Row"],
+                    "Column": hit["Column"],
                     "Content": hit["Content"],
                     "Translated": hit["Translated"],
                     "Source": "Grocery"
@@ -335,33 +679,16 @@ def main():
                 logging.info(f"Translation map saved: {json_path}")
                 print(f"  Translation map saved to: {json_path}")
 
-            # Apply translations to Excel
+            # Apply translations to DataFrame
             for idx, t in enumerate(targets):
                 if idx < len(translated):
-                    ws[t["Cell"]] = translated[idx]
+                    df.at[t["Row"], t["Column"]] = translated[idx]
                 else:
-                    ws[t["Cell"]] = "[TRANSLATION ERROR]"
+                    df.at[t["Row"], t["Column"]] = "[TRANSLATION ERROR]"
                     logging.error(f"Index error: {idx} is out of range in translated array")
         
-        # 사전에서만 찾아서 번역한 경우 맵 저장
-        elif grocery_hits:
-            json_path = os.path.splitext(input_file)[0] + f"_{ws.title}_translation_map.json"
-            translation_map = [
-                {
-                    "Sheet": hit["Sheet"],
-                    "Cell": hit["Cell"],
-                    "Content": hit["Content"],
-                    "Translated": hit["Translated"],
-                    "Source": "Grocery"
-                } for hit in grocery_hits
-            ]
-            
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(translation_map, f, ensure_ascii=False, indent=2)
-                logging.info(f"Translation map saved: {json_path}")
-                print(f"  Translation map saved to: {json_path} (100% from grocery)")
-
-    wb.save(output_file)
+        # 번역된 CSV 파일 저장
+        save_file(df, output_file, 'csv')
     
     # 최종 통계
     efficiency = (total_saved / total_items * 100) if total_items > 0 else 0
