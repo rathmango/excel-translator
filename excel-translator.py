@@ -736,64 +736,98 @@ def main():
             print(f"  {len(contents)} items to translate in CSV file.")
 
             try:
+                # 번역 시도
                 translated = batch_translate(contents, source_lang_name, target_lang_name, translation_grocery)
+                
+                # 결과가 None이거나 빈 리스트인 경우 처리
+                if translated is None or len(translated) == 0:
+                    logging.error("Translation returned None or empty list")
+                    print("번역 결과가 비어있습니다. 원본 텍스트를 유지합니다.")
+                    translated = [f"[ERROR] {content}" for content in contents]
+                
                 # 오류 표시 항목 개수 확인
                 error_count = sum(1 for item in translated if isinstance(item, str) and item.startswith("[ERROR]"))
                 if error_count > 0:
                     logging.warning(f"{error_count} items could not be translated and were marked with [ERROR]")
+                    
+                # 길이 불일치 체크 및 안전장치
+                if len(translated) != len(contents):
+                    logging.error(f"Critical error: translated length {len(translated)} != contents length {len(contents)}")
+                    # 길이 조정
+                    if len(translated) > len(contents):
+                        logging.warning(f"Truncating translated results from {len(translated)} to {len(contents)}")
+                        translated = translated[:len(contents)]
+                    else:  # len(translated) < len(contents)
+                        logging.warning(f"Filling missing items from {len(translated)} to {len(contents)}")
+                        translated.extend([f"[ERROR] Missing translation" for _ in range(len(contents) - len(translated))])
+                
+                # 번역 결과를 사전에 추가 (오류 항목 제외)
+                for i, content in enumerate(contents):
+                    if i < len(translated) and not translated[i].startswith("[ERROR]"):
+                        translation_grocery[content] = translated[i]
+                
+                # 사전 상태 저장
+                with open(grocery_file, "w", encoding="utf-8") as f:
+                    json.dump(translation_grocery, f, ensure_ascii=False, indent=2)
+                    logging.info(f"Updated translation grocery with {len(translation_grocery)} items")
+
+                # Save translation map as JSON
+                json_path = os.path.splitext(input_file)[0] + "_translation_map.json"
+                
+                # 안전하게 translation_map 생성
+                translation_map = []
+                
+                # API로 번역된 항목 처리
+                for i, target in enumerate(targets):
+                    trans_value = ""
+                    if i < len(translated):
+                        trans_value = translated[i]
+                    else:
+                        trans_value = f"[ERROR] Index {i} out of range"
+                        
+                    translation_map.append({
+                        "Row": target["Row"],
+                        "Column": target["Column"],
+                        "Content": target["Content"],
+                        "Translated": trans_value,
+                        "Source": "API"
+                    })
+                
+                # 사전에서 가져온 항목 처리
+                for hit in grocery_hits:
+                    translation_map.append({
+                        "Row": hit["Row"],
+                        "Column": hit["Column"],
+                        "Content": hit["Content"],
+                        "Translated": hit["Translated"],
+                        "Source": "Grocery"
+                    })
+                
+                # 번역 맵 저장
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(translation_map, f, ensure_ascii=False, indent=2)
+                    logging.info(f"Translation map saved: {json_path}")
+                    print(f"  Translation map saved to: {json_path}")
+
+                # Apply translations to DataFrame - 안전하게 적용
+                for i, t in enumerate(targets):
+                    if i < len(translated):
+                        df.at[t["Row"], t["Column"]] = translated[i]
+                    else:
+                        df.at[t["Row"], t["Column"]] = f"[ERROR] Translation failed"
+                        logging.error(f"Index error: {i} is out of range in translated array")
+                
             except Exception as e:
                 logging.error(f"Error during translation on CSV file: {str(e)}")
-                print(f"Error during translation on CSV file: {e}")
+                print(f"CSV 파일 번역 중 오류 발생: {e}")
+                # 오류 발생 시에도 원본 파일 저장 시도
+                error_file = os.path.splitext(input_file)[0] + "_error" + os.path.splitext(input_file)[1]
+                try:
+                    save_file(df, error_file, 'csv')
+                    print(f"오류 발생 상태의 파일이 {error_file}에 저장되었습니다.")
+                except:
+                    print("오류 상태 파일 저장에 실패했습니다.")
                 return
-
-            # 번역 결과 길이 체크 및 조정 - batch_translate 함수에서 처리되었으므로 여기서는 검증만
-            if len(translated) != len(contents):
-                logging.error(f"Critical error: translated length {len(translated)} != contents length {len(contents)}")
-                translated = translated[:len(contents)] if len(translated) > len(contents) else translated + ["[TRANSLATION ERROR]"] * (len(contents) - len(translated))
-
-            # 번역 결과를 사전에 추가
-            for i, content in enumerate(contents):
-                translation_grocery[content] = translated[i]
-            
-            # 사전 상태 저장
-            with open(grocery_file, "w", encoding="utf-8") as f:
-                json.dump(translation_grocery, f, ensure_ascii=False, indent=2)
-                logging.info(f"Updated translation grocery with {len(translation_grocery)} items")
-
-            # Save translation map as JSON
-            json_path = os.path.splitext(input_file)[0] + "_translation_map.json"
-            
-            # targets와 grocery_hits 모두 포함한 전체 맵 생성
-            translation_map = [
-                {
-                    "Row": targets[i]["Row"],
-                    "Column": targets[i]["Column"],
-                    "Content": targets[i]["Content"],
-                    "Translated": translated[i] if i < len(translated) else "[TRANSLATION ERROR]",
-                    "Source": "API"
-                } for i in range(len(targets))
-            ] + [
-                {
-                    "Row": hit["Row"],
-                    "Column": hit["Column"],
-                    "Content": hit["Content"],
-                    "Translated": hit["Translated"],
-                    "Source": "Grocery"
-                } for hit in grocery_hits
-            ]
-            
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(translation_map, f, ensure_ascii=False, indent=2)
-                logging.info(f"Translation map saved: {json_path}")
-                print(f"  Translation map saved to: {json_path}")
-
-            # Apply translations to DataFrame
-            for idx, t in enumerate(targets):
-                if idx < len(translated):
-                    df.at[t["Row"], t["Column"]] = translated[idx]
-                else:
-                    df.at[t["Row"], t["Column"]] = "[TRANSLATION ERROR]"
-                    logging.error(f"Index error: {idx} is out of range in translated array")
         
         # 번역된 CSV 파일 저장
         save_file(df, output_file, 'csv')
