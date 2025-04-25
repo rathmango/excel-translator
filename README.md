@@ -4,7 +4,9 @@
 
 ## 주요 기능
 
+- 엑셀 파일(XLSX)과 CSV 파일 모두 지원
 - 엑셀 파일의 모든 시트에서 한글 셀 자동 감지
+- 100개 이상의 언어 간 번역 지원 (드롭다운 메뉴로 쉽게 선택)
 - GPT-4.1 모델을 활용한 고품질 번역
 - 용어 사전(grocery) 기능으로 번역 일관성 유지
 - 같은 시트 내에서도 동일 용어는 일관되게 번역
@@ -16,7 +18,7 @@
 
 1. 필요한 패키지 설치:
 ```
-pip install openai openpyxl tqdm
+pip install openai openpyxl pandas inquirer tqdm
 ```
 
 2. 스크립트 실행:
@@ -26,12 +28,12 @@ python excel-translator.py
 
 3. 프롬프트에 따라 입력:
    - OpenAI API 키
-   - 번역할 엑셀 파일 경로 
-   - 원본 언어 코드 (예: Korean)
-   - 대상 언어 코드 (예: English)
+   - 번역할 파일 경로 (XLSX 또는 CSV)
+   - 원본 언어 (드롭다운 메뉴에서 선택)
+   - 대상 언어 (드롭다운 메뉴에서 선택)
 
 4. 결과 파일:
-   - 번역된 엑셀 파일 (원본파일명_batched_translated_언어.xlsx)
+   - 번역된 파일 (원본파일명_translated_언어코드.xlsx 또는 .csv)
    - 번역 맵 JSON 파일 (원본파일명_시트명_translation_map.json)
    - 용어 사전 파일 (원본파일명_translation_grocery.json)
    - 로그 파일 (translation_log.txt)
