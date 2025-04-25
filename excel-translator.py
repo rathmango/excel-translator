@@ -591,7 +591,7 @@ def main():
                         "Content": targets[i]["Content"],
                         "Translated": translated[i],
                         "Source": "API"
-                    } for i in range(len(contents))
+                    } for i in range(len(targets))
                 ] + [
                     {
                         "Sheet": hit["Sheet"],
@@ -718,9 +718,9 @@ def main():
                     "Row": targets[i]["Row"],
                     "Column": targets[i]["Column"],
                     "Content": targets[i]["Content"],
-                    "Translated": translated[i],
+                    "Translated": translated[i] if i < len(translated) else "[TRANSLATION ERROR]",
                     "Source": "API"
-                } for i in range(len(contents))
+                } for i in range(len(targets))
             ] + [
                 {
                     "Row": hit["Row"],
