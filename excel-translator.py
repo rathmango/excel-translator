@@ -36,7 +36,36 @@ LANGUAGE_CODES = {
     'hi': 'Hindi',
     'vi': 'Vietnamese',
     'th': 'Thai',
-    'id': 'Indonesian'
+    'id': 'Indonesian',
+    'tr': 'Turkish',
+    'nl': 'Dutch',
+    'he': 'Hebrew',
+    'pl': 'Polish',
+    'sv': 'Swedish',
+    'fi': 'Finnish',
+    'da': 'Danish',
+    'no': 'Norwegian',
+    'el': 'Greek',
+    'hu': 'Hungarian',
+    'cs': 'Czech',
+    'uk': 'Ukrainian',
+    'fa': 'Persian',
+    'ro': 'Romanian',
+    'bg': 'Bulgarian'
+}
+
+# 언어별 문자 범위 정의
+LANGUAGE_RANGES = {
+    'ko': {'ranges': [('\uac00', '\ud7af')], 'name': 'Korean', 'detect_func': 'has_korean'},  # 한글
+    'ja': {'ranges': [('\u3040', '\u30ff'), ('\u3400', '\u4dbf'), ('\u4e00', '\u9fff')], 'name': 'Japanese'},  # 일본어(히라가나, 가타카나, 한자)
+    'zh': {'ranges': [('\u4e00', '\u9fff')], 'name': 'Chinese'},  # 중국어 간체/번체
+    'ru': {'ranges': [('\u0400', '\u04FF')], 'name': 'Russian'},  # 키릴 문자(러시아어 등)
+    'ar': {'ranges': [('\u0600', '\u06FF')], 'name': 'Arabic'},  # 아랍어
+    'he': {'ranges': [('\u0590', '\u05FF')], 'name': 'Hebrew'},  # 히브리어
+    'th': {'ranges': [('\u0E00', '\u0E7F')], 'name': 'Thai'},  # 태국어
+    'hi': {'ranges': [('\u0900', '\u097F')], 'name': 'Hindi'},  # 힌디어(데바나가리)
+    'el': {'ranges': [('\u0370', '\u03FF')], 'name': 'Greek'},  # 그리스어
+    # 라틴 문자 기반 언어들은 특별한 감지 방법 사용
 }
 
 def has_korean(text):
@@ -51,20 +80,65 @@ def has_japanese(text):
     # 일본어 문자(히라가나, 가타카나, 일부 한자) 유니코드 범위
     return bool(re.search('[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]', text))
 
+def has_specific_language_chars(text, ranges):
+    """특정 유니코드 범위의 문자가 텍스트에 포함되어 있는지 확인"""
+    if not isinstance(text, str) or not text.strip():
+        return False
+    
+    for start, end in ranges:
+        pattern = f'[{start}-{end}]'
+        if re.search(pattern, text):
+            return True
+    return False
+
+def detect_language(text):
+    """텍스트의 언어를 감지하여 가장 가능성 높은 언어 코드 반환"""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    
+    # 각 언어별 문자 범위 확인
+    for lang_code, lang_info in LANGUAGE_RANGES.items():
+        if has_specific_language_chars(text, lang_info['ranges']):
+            return lang_code
+    
+    # 특수 언어 확인
+    if has_korean(text):
+        return 'ko'
+    if has_japanese(text):
+        return 'ja'
+    
+    # 라틴 문자 기반 언어는 기본적으로 영어로 간주 (정확한 구분은 어려움)
+    if re.search('[a-zA-Z]', text):
+        return 'en'
+    
+    # 기타 문자
+    return None
+
 def has_target_language(text, lang_code):
     """
     지정된 언어가 텍스트에 포함되어 있는지 확인
-    현재 한국어와 일본어 감지 지원
+    모든 주요 언어 감지 지원
     """
+    # 언어 감지 기능이 없으면 단순 텍스트 존재 여부로 판단
+    if not isinstance(text, str) or not text.strip():
+        return False
+    
+    # 특수 언어 체크
     if lang_code == 'ko':
         return has_korean(text)
     elif lang_code == 'ja':
         return has_japanese(text)
-    # 다른 언어의 경우 텍스트가 비어 있지 않으면 일단 처리 (일반 텍스트로 간주)
-    elif isinstance(text, str) and text.strip():
+    # 언어 범위가 정의된 경우
+    elif lang_code in LANGUAGE_RANGES:
+        return has_specific_language_chars(text, LANGUAGE_RANGES[lang_code]['ranges'])
+    # 언어 코드가 'any'인 경우 모든 텍스트 처리
+    elif lang_code == 'any':
         return True
-    return False
-
+    # 기타 언어는 해당 언어로 감지된 경우에만 처리
+    else:
+        detected = detect_language(text)
+        return detected == lang_code or detected is None
+        
 def batch_translate(contents, src, tgt, grocery=None, max_retry=3):
     """
     contents: List of strings
@@ -295,12 +369,16 @@ def main():
         return
     
     # 언어 코드 직접 입력
-    print("\n지원되는 언어 코드 예시: ko (한국어), en (영어), ja (일본어), zh (중국어), fr (프랑스어), es (스페인어), de (독일어)")
-    source_lang = input("원본 언어 코드를 입력하세요: ").strip().lower()
+    print("\n지원되는 언어 코드 예시:")
+    print("- ko (한국어), ja (일본어), zh (중국어), en (영어)")
+    print("- fr (프랑스어), es (스페인어), de (독일어), ru (러시아어)")
+    print("- ar (아랍어), hi (힌디어), th (태국어), vi (베트남어)")
+    print("- any (모든 언어 감지)")
+    source_lang = input("원본 언어 코드를 입력하세요 (모든 언어: 'any'): ").strip().lower()
     target_lang = input("대상 언어 코드를 입력하세요: ").strip().lower()
 
     # 선택된 언어 코드에 해당하는 언어 이름 찾기
-    source_lang_name = get_language_name(source_lang)
+    source_lang_name = "Any language" if source_lang == 'any' else get_language_name(source_lang)
     target_lang_name = get_language_name(target_lang)
     
     # 출력 파일 이름 설정
