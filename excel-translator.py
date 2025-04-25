@@ -114,14 +114,25 @@ def detect_language(text):
     # 기타 문자
     return None
 
-def has_target_language(text, lang_code):
+def has_target_language(text, lang_code, target_lang=None):
     """
     지정된 언어가 텍스트에 포함되어 있는지 확인
     모든 주요 언어 감지 지원
+    target_lang이 제공되면 해당 언어는 제외
     """
     # 언어 감지 기능이 없으면 단순 텍스트 존재 여부로 판단
     if not isinstance(text, str) or not text.strip():
         return False
+    
+    # 'any' 코드인 경우, 대상 언어와 다른 언어인지 확인
+    if lang_code == 'any' and target_lang:
+        # 대상 언어의 텍스트인지 확인
+        detected = detect_language(text)
+        # 감지된 언어가 대상 언어와 같으면 번역 대상에서 제외
+        if detected == target_lang:
+            return False
+        # 그 외의 모든 경우는 번역 대상에 포함
+        return True
     
     # 특수 언어 체크
     if lang_code == 'ko':
@@ -131,14 +142,14 @@ def has_target_language(text, lang_code):
     # 언어 범위가 정의된 경우
     elif lang_code in LANGUAGE_RANGES:
         return has_specific_language_chars(text, LANGUAGE_RANGES[lang_code]['ranges'])
-    # 언어 코드가 'any'인 경우 모든 텍스트 처리
+    # 언어 코드가 'any'인 경우 모든 텍스트 처리 (target_lang 검사 이미 수행됨)
     elif lang_code == 'any':
         return True
     # 기타 언어는 해당 언어로 감지된 경우에만 처리
     else:
         detected = detect_language(text)
         return detected == lang_code or detected is None
-        
+
 def batch_translate(contents, src, tgt, grocery=None, max_retry=3):
     """
     contents: List of strings
@@ -373,9 +384,12 @@ def main():
     print("- ko (한국어), ja (일본어), zh (중국어), en (영어)")
     print("- fr (프랑스어), es (스페인어), de (독일어), ru (러시아어)")
     print("- ar (아랍어), hi (힌디어), th (태국어), vi (베트남어)")
-    print("- any (모든 언어 감지)")
+    print("- any (모든 언어 감지, 대상 언어 제외)")
     source_lang = input("원본 언어 코드를 입력하세요 (모든 언어: 'any'): ").strip().lower()
     target_lang = input("대상 언어 코드를 입력하세요: ").strip().lower()
+    
+    # 시트 이름 번역 여부 확인
+    translate_sheet_names = input("시트 이름도 번역하시겠습니까? (y/n): ").strip().lower() == 'y'
 
     # 선택된 언어 코드에 해당하는 언어 이름 찾기
     source_lang_name = "Any language" if source_lang == 'any' else get_language_name(source_lang)
@@ -386,6 +400,7 @@ def main():
 
     logging.info(f"Starting translation: {input_file}")
     logging.info(f"Source language: {source_lang} ({source_lang_name}), Target language: {target_lang} ({target_lang_name})")
+    logging.info(f"Translate sheet names: {translate_sheet_names}")
 
     # 파일 로드
     try:
@@ -410,6 +425,68 @@ def main():
         total_sheets = len(wb.worksheets)
         logging.info(f"Found {total_sheets} sheets")
         
+        # 시트 이름 번역 (선택 시)
+        if translate_sheet_names and total_sheets > 0:
+            print("\n시트 이름 번역 중...")
+            sheet_names = [ws.title for ws in wb.worksheets]
+            sheet_names_to_translate = []
+            
+            # 번역이 필요한 시트 이름 확인
+            for name in sheet_names:
+                if has_target_language(name, source_lang, target_lang if source_lang == 'any' else None):
+                    if name in translation_grocery:
+                        logging.info(f"Sheet name reused from grocery: '{name}' -> '{translation_grocery[name]}'")
+                    else:
+                        sheet_names_to_translate.append(name)
+            
+            # 시트 이름 번역
+            if sheet_names_to_translate:
+                try:
+                    translated_names = batch_translate(sheet_names_to_translate, source_lang_name, target_lang_name)
+                    
+                    # 번역 결과를 grocery에 추가
+                    for i, name in enumerate(sheet_names_to_translate):
+                        translation_grocery[name] = translated_names[i]
+                    
+                    # 번역 결과를 적용 - 새 워크북으로 복사하면서 시트 이름 변경
+                    new_wb = Workbook()
+                    # 기본 시트 제거
+                    if new_wb.worksheets:
+                        new_wb.remove(new_wb.worksheets[0])
+                        
+                    # 각 시트 복사하며 이름 변경
+                    for i, ws in enumerate(wb.worksheets):
+                        old_name = ws.title
+                        if has_target_language(old_name, source_lang, target_lang if source_lang == 'any' else None):
+                            if old_name in translation_grocery:
+                                new_name = translation_grocery[old_name]
+                            else:
+                                new_name = old_name  # 번역 실패 시 원본 이름 유지
+                        else:
+                            new_name = old_name  # 대상 언어가 아닌 경우 원본 이름 유지
+                            
+                        # 유효한 시트 이름으로 변환 (특수문자 제한 등)
+                        new_name = new_name[:31]  # Excel 시트 이름 길이 제한
+                        new_name = re.sub(r'[\[\]\:\*\?\/\\]', '_', new_name)  # 금지된 문자 대체
+                        
+                        # 새 시트 생성 및 복사
+                        new_ws = new_wb.create_sheet(title=new_name)
+                        
+                        # 시트 내용 복사
+                        for row in ws.iter_rows():
+                            for cell in row:
+                                new_ws[cell.coordinate] = cell.value
+                                
+                        print(f"  시트 이름 번역: '{old_name}' -> '{new_name}'")
+                    
+                    # 기존 워크북 대신 새 워크북 사용
+                    wb = new_wb
+                    
+                except Exception as e:
+                    logging.error(f"Error during sheet name translation: {str(e)}")
+                    print(f"시트 이름 번역 중 오류 발생: {e}")
+        
+        # 시트 내용 번역
         for ws_idx, ws in enumerate(wb.worksheets):
             logging.info(f"Processing sheet: {ws.title} ({ws_idx+1}/{total_sheets})")
             print(f"\n[{ws.title}] ({ws_idx+1}/{total_sheets}) -- {source_lang_name} 텍스트 추출 중...")
@@ -418,8 +495,8 @@ def main():
             
             for row in ws.iter_rows():
                 for cell in row:
-                    if has_target_language(cell.value, source_lang):
-                        content = cell.value.strip()
+                    if has_target_language(cell.value, source_lang, target_lang if source_lang == 'any' else None):
+                        content = cell.value.strip() if isinstance(cell.value, str) else str(cell.value)
                         # 사전에 있는지 확인
                         if content in translation_grocery:
                             grocery_hits.append({
@@ -549,7 +626,7 @@ def main():
         # 데이터프레임 순회하며 번역 대상 찾기
         for col in df.columns:
             for idx, value in enumerate(df[col]):
-                if has_target_language(value, source_lang):
+                if has_target_language(value, source_lang, target_lang if source_lang == 'any' else None):
                     content = str(value).strip()
                     # 사전에 있는지 확인
                     if content in translation_grocery:
