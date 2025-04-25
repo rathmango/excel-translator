@@ -1,0 +1,43 @@
+# 로그 파일 및 민감한 정보 제외
+translation_log.txt
+*_translation_map.json
+*_translation_grocery.json
+*_translated_*.xlsx
+*_batched_translated_*.xlsx
+
+# Python 관련 파일 무시
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 가상 환경
+venv/
+ENV/
+.env
+
+# IDE 관련 파일
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 시스템 파일
+.DS_Store
+Thumbs.db 
