@@ -119,9 +119,14 @@ def has_target_language(text, lang_code, target_lang=None):
     지정된 언어가 텍스트에 포함되어 있는지 확인
     모든 주요 언어 감지 지원
     target_lang이 제공되면 해당 언어는 제외
+    숫자만 있는 텍스트는 제외
     """
     # 언어 감지 기능이 없으면 단순 텍스트 존재 여부로 판단
     if not isinstance(text, str) or not text.strip():
+        return False
+    
+    # 숫자만 있는 경우 번역 대상에서 제외
+    if isinstance(text, str) and re.match(r'^[\d,.\s-]+$', text.strip()):
         return False
     
     # 'any' 코드인 경우, 대상 언어와 다른 언어인지 확인
