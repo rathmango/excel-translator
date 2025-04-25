@@ -287,19 +287,27 @@ def batch_translate(contents, src, tgt, grocery=None, max_retry=3):
                     logging.info(f"Batch translation succeeded with {len(translated)} items.")
                     return translated
                 elif len(translated) > len(contents):
-                    logging.warning(f"API returned more items than expected. Truncating to {len(contents)} items.")
-                    return translated[:len(contents)]
-                else:
-                    # 응답이 부족한 경우: 가능한 한 많이 사용하고 나머지는 오류 표시
-                    if len(translated) >= len(contents) * 0.9:  # 90% 이상이면 부족한 부분 채우기
-                        logging.warning(f"API returned fewer items than expected ({len(translated)}/{len(contents)}). Filling missing items.")
+                    # 항목이 더 많은 경우: 재시도
+                    logging.warning(f"API returned more items than expected ({len(translated)}). Retrying... (attempt {attempt+1}/{max_retry})")
+                    if attempt == max_retry - 1:  # 마지막 시도인 경우
+                        logging.warning(f"Last retry failed. Returning exact number of items by truncating.")
+                        return translated[:len(contents)]
+                    continue  # 다음 시도로
+                else:  # len(translated) < len(contents)
+                    # 항목이 부족한 경우: 재시도
+                    logging.warning(f"API returned fewer items than expected ({len(translated)}/{len(contents)}). Retrying... (attempt {attempt+1}/{max_retry})")
+                    if attempt == max_retry - 1:  # 마지막 시도인 경우
+                        logging.warning(f"Last retry failed. Filling missing items with [TRANSLATION ERROR].")
                         missing = len(contents) - len(translated)
                         translated.extend(["[TRANSLATION ERROR]"] * missing)
                         return translated
+                    continue  # 다음 시도로
+            else:
+                logging.warning(f"API did not return a valid list. Retrying... (attempt {attempt+1}/{max_retry})")
+                if attempt == max_retry - 1:  # 마지막 시도인 경우
+                    return [f"[ERROR] {text}" for text in contents]
+                continue  # 다음 시도로
             
-            logging.warning(
-                f"Batch translation output mismatch: expected {len(contents)}, got {len(translated) if isinstance(translated, list) else 'not a list'}"
-            )
         except Exception as e:
             logging.warning(f"Batch translation parsing failed: {str(e)}")
             
@@ -315,14 +323,25 @@ def batch_translate(contents, src, tgt, grocery=None, max_retry=3):
                         logging.info(f"Recovery successful! Found {len(fixed_json)} items.")
                         if len(fixed_json) == len(contents):
                             return fixed_json
+                        elif attempt < max_retry - 1:
+                            logging.warning(f"Recovered list length mismatch. Retrying... (attempt {attempt+1}/{max_retry})")
+                            continue  # 다음 시도로
                         elif len(fixed_json) > len(contents):
+                            logging.warning(f"Last retry failed. Using recovered list and truncating.")
                             return fixed_json[:len(contents)]
+                        else:  # len(fixed_json) < len(contents)
+                            logging.warning(f"Last retry failed. Using recovered list and filling missing items.")
+                            missing = len(contents) - len(fixed_json)
+                            fixed_json.extend(["[TRANSLATION ERROR]"] * missing)
+                            return fixed_json
             except:
                 logging.warning("Advanced recovery failed")
-        
-        logging.warning("Retrying batch translation...")
+                
+            if attempt < max_retry - 1:
+                logging.warning(f"Retrying batch translation... (attempt {attempt+1}/{max_retry})")
+                continue  # 다음 시도로
     
-    logging.error("Batch translation failed after retries.")
+    logging.error("Batch translation failed after all retries.")
     
     # 모든 재시도 실패 시: 원본 텍스트 반환하고 오류 표시
     logging.warning("Returning original text with error markers as fallback")
