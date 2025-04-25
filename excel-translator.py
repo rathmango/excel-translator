@@ -7,6 +7,7 @@ from tqdm import tqdm
 import re
 import logging
 import csv
+import datetime
 
 # 로깅 설정
 logging.basicConfig(
@@ -17,6 +18,35 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
+# 오류 발생 시 세부 정보를 저장할 디렉토리
+ERROR_LOGS_DIR = "translation_error_logs"
+os.makedirs(ERROR_LOGS_DIR, exist_ok=True)
+
+# 요청과 응답을 파일에 저장하는 함수
+def save_request_response_log(request_content, response_content, error_type):
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = f"{ERROR_LOGS_DIR}/translation_error_{error_type}_{timestamp}.json"
+    
+    log_data = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "error_type": error_type,
+        "request": {
+            "content_count": len(request_content),
+            "content": request_content
+        },
+        "response": {
+            "content_count": len(response_content) if isinstance(response_content, list) else "not a list",
+            "content": response_content
+        }
+    }
+    
+    with open(log_filename, "w", encoding="utf-8") as f:
+        json.dump(log_data, f, ensure_ascii=False, indent=2)
+    
+    logging.info(f"Error details saved to {log_filename}")
+    print(f"번역 오류 세부 정보가 {log_filename}에 저장되었습니다.")
+    return log_filename
 
 # API 키는 실행 시 입력받습니다
 
@@ -295,6 +325,10 @@ def batch_translate(contents, src, tgt, grocery=None, max_retry=3):
                 elif len(translated) > len(contents):
                     # 항목이 더 많은 경우: 재시도
                     logging.warning(f"API returned more items than expected ({len(translated)}). Retrying... (attempt {attempt+1}/{max_retry})")
+                    
+                    # 오류 세부 정보 저장
+                    error_log_file = save_request_response_log(contents, translated, "more_items")
+                    
                     if attempt == max_retry - 1:  # 마지막 시도인 경우
                         logging.warning(f"Last retry failed. Returning exact number of items by truncating.")
                         return translated[:len(contents)]
@@ -302,6 +336,10 @@ def batch_translate(contents, src, tgt, grocery=None, max_retry=3):
                 else:  # len(translated) < len(contents)
                     # 항목이 부족한 경우: 재시도
                     logging.warning(f"API returned fewer items than expected ({len(translated)}/{len(contents)}). Retrying... (attempt {attempt+1}/{max_retry})")
+                    
+                    # 오류 세부 정보 저장
+                    error_log_file = save_request_response_log(contents, translated, "fewer_items")
+                    
                     if attempt == max_retry - 1:  # 마지막 시도인 경우
                         logging.warning(f"Last retry failed. Filling missing items with [TRANSLATION ERROR].")
                         missing = len(contents) - len(translated)
@@ -310,12 +348,19 @@ def batch_translate(contents, src, tgt, grocery=None, max_retry=3):
                     continue  # 다음 시도로
             else:
                 logging.warning(f"API did not return a valid list. Retrying... (attempt {attempt+1}/{max_retry})")
+                
+                # 오류 세부 정보 저장
+                error_log_file = save_request_response_log(contents, result, "not_a_list")
+                
                 if attempt == max_retry - 1:  # 마지막 시도인 경우
                     return [f"[ERROR] {text}" for text in contents]
                 continue  # 다음 시도로
             
         except Exception as e:
             logging.warning(f"Batch translation parsing failed: {str(e)}")
+            
+            # 오류 세부 정보 저장
+            error_log_file = save_request_response_log(contents, result, "parse_error")
             
             # 고급 오류 복구 시도: 문자열에서 JSON 배열 패턴 찾기
             try:
