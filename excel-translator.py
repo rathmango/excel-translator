@@ -6,8 +6,6 @@ import json
 from tqdm import tqdm
 import re
 import logging
-import inquirer
-from inquirer import errors
 import csv
 
 # 로깅 설정
@@ -22,118 +20,24 @@ logging.basicConfig(
 
 # API 키는 실행 시 입력받습니다
 
-# 지원되는 언어 목록 (ISO 코드와 이름)
-SUPPORTED_LANGUAGES = [
-    ('af', 'Afrikaans'),
-    ('sq', 'Albanian'),
-    ('am', 'Amharic'),
-    ('ar', 'Arabic'),
-    ('hy', 'Armenian'),
-    ('az', 'Azerbaijani'),
-    ('eu', 'Basque'),
-    ('be', 'Belarusian'),
-    ('bn', 'Bengali'),
-    ('bs', 'Bosnian'),
-    ('bg', 'Bulgarian'),
-    ('ca', 'Catalan'),
-    ('ceb', 'Cebuano'),
-    ('ny', 'Chichewa'),
-    ('zh-CN', 'Chinese (Simplified)'),
-    ('zh-TW', 'Chinese (Traditional)'),
-    ('co', 'Corsican'),
-    ('hr', 'Croatian'),
-    ('cs', 'Czech'),
-    ('da', 'Danish'),
-    ('nl', 'Dutch'),
-    ('en', 'English'),
-    ('eo', 'Esperanto'),
-    ('et', 'Estonian'),
-    ('tl', 'Filipino'),
-    ('fi', 'Finnish'),
-    ('fr', 'French'),
-    ('fy', 'Frisian'),
-    ('gl', 'Galician'),
-    ('ka', 'Georgian'),
-    ('de', 'German'),
-    ('el', 'Greek'),
-    ('gu', 'Gujarati'),
-    ('ht', 'Haitian Creole'),
-    ('ha', 'Hausa'),
-    ('haw', 'Hawaiian'),
-    ('iw', 'Hebrew'),
-    ('hi', 'Hindi'),
-    ('hmn', 'Hmong'),
-    ('hu', 'Hungarian'),
-    ('is', 'Icelandic'),
-    ('ig', 'Igbo'),
-    ('id', 'Indonesian'),
-    ('ga', 'Irish'),
-    ('it', 'Italian'),
-    ('ja', 'Japanese'),
-    ('jw', 'Javanese'),
-    ('kn', 'Kannada'),
-    ('kk', 'Kazakh'),
-    ('km', 'Khmer'),
-    ('rw', 'Kinyarwanda'),
-    ('ko', 'Korean'),
-    ('ku', 'Kurdish'),
-    ('ky', 'Kyrgyz'),
-    ('lo', 'Lao'),
-    ('la', 'Latin'),
-    ('lv', 'Latvian'),
-    ('lt', 'Lithuanian'),
-    ('lb', 'Luxembourgish'),
-    ('mk', 'Macedonian'),
-    ('mg', 'Malagasy'),
-    ('ms', 'Malay'),
-    ('ml', 'Malayalam'),
-    ('mt', 'Maltese'),
-    ('mi', 'Maori'),
-    ('mr', 'Marathi'),
-    ('mn', 'Mongolian'),
-    ('my', 'Myanmar (Burmese)'),
-    ('ne', 'Nepali'),
-    ('no', 'Norwegian'),
-    ('or', 'Odia (Oriya)'),
-    ('ps', 'Pashto'),
-    ('fa', 'Persian'),
-    ('pl', 'Polish'),
-    ('pt', 'Portuguese'),
-    ('pa', 'Punjabi'),
-    ('ro', 'Romanian'),
-    ('ru', 'Russian'),
-    ('sm', 'Samoan'),
-    ('gd', 'Scots Gaelic'),
-    ('sr', 'Serbian'),
-    ('st', 'Sesotho'),
-    ('sn', 'Shona'),
-    ('sd', 'Sindhi'),
-    ('si', 'Sinhala'),
-    ('sk', 'Slovak'),
-    ('sl', 'Slovenian'),
-    ('so', 'Somali'),
-    ('es', 'Spanish'),
-    ('su', 'Sundanese'),
-    ('sw', 'Swahili'),
-    ('sv', 'Swedish'),
-    ('tg', 'Tajik'),
-    ('ta', 'Tamil'),
-    ('tt', 'Tatar'),
-    ('te', 'Telugu'),
-    ('th', 'Thai'),
-    ('tr', 'Turkish'),
-    ('tk', 'Turkmen'),
-    ('uk', 'Ukrainian'),
-    ('ur', 'Urdu'),
-    ('ug', 'Uyghur'),
-    ('uz', 'Uzbek'),
-    ('vi', 'Vietnamese'),
-    ('cy', 'Welsh'),
-    ('xh', 'Xhosa'),
-    ('yi', 'Yiddish'),
-    ('yo', 'Yoruba'),
-    ('zu', 'Zulu')
-]
+# 지원되는 언어 코드와 이름 매핑
+LANGUAGE_CODES = {
+    'ko': 'Korean',
+    'en': 'English',
+    'ja': 'Japanese',
+    'zh': 'Chinese',
+    'es': 'Spanish',
+    'fr': 'French',
+    'de': 'German',
+    'ru': 'Russian',
+    'pt': 'Portuguese',
+    'it': 'Italian',
+    'ar': 'Arabic',
+    'hi': 'Hindi',
+    'vi': 'Vietnamese',
+    'th': 'Thai',
+    'id': 'Indonesian'
+}
 
 def has_korean(text):
     if not isinstance(text, str) or not text.strip():
@@ -141,54 +45,31 @@ def has_korean(text):
     # 한글 유니코드 범위
     return bool(re.search('[\uac00-\ud7af]', text))
 
+def has_japanese(text):
+    if not isinstance(text, str) or not text.strip():
+        return False
+    # 일본어 문자(히라가나, 가타카나, 일부 한자) 유니코드 범위
+    return bool(re.search('[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]', text))
+
 def has_target_language(text, lang_code):
     """
     지정된 언어가 텍스트에 포함되어 있는지 확인
-    현재는 한국어만 지원하며 추후 확장 가능
+    현재 한국어와 일본어 감지 지원
     """
     if lang_code == 'ko':
         return has_korean(text)
-    # 다른 언어 감지 기능은 필요에 따라 추가
+    elif lang_code == 'ja':
+        return has_japanese(text)
+    # 다른 언어의 경우 텍스트가 비어 있지 않으면 일단 처리 (일반 텍스트로 간주)
+    elif isinstance(text, str) and text.strip():
+        return True
     return False
-
-def validate_language_choice(answers, current):
-    if not current:
-        raise errors.ValidationError('', reason='언어를 선택해야 합니다')
-    return True
-
-def select_language(message, default_language=None):
-    """
-    사용자에게 언어 선택 인터페이스 제공
-    """
-    # 키워드 검색을 위한 처리
-    formatted_choices = [f"{code} ({name})" for code, name in SUPPORTED_LANGUAGES]
-    default_index = None
-    
-    if default_language:
-        for i, (code, name) in enumerate(SUPPORTED_LANGUAGES):
-            if code == default_language or name == default_language:
-                default_index = i
-                break
-    
-    questions = [
-        inquirer.List('language',
-                      message=message,
-                      choices=formatted_choices,
-                      default=formatted_choices[default_index] if default_index is not None else None,
-                      validate=validate_language_choice),
-    ]
-    
-    answers = inquirer.prompt(questions)
-    selected = answers['language']
-    # "ko (Korean)" 형태에서 코드 추출
-    lang_code = selected.split(' ')[0]
-    return lang_code
 
 def batch_translate(contents, src, tgt, grocery=None, max_retry=3):
     """
-    contents: List of strings (Korean)
+    contents: List of strings
     grocery: 현재까지 구축된 용어 사전 (선택적)
-    Returns: List of translated strings (English)
+    Returns: List of translated strings
     """
     # 입력이 비어있거나 너무 작으면 빈 배열 반환
     if not contents:
@@ -397,6 +278,10 @@ def save_file(data, output_file, file_type):
     
     return output_file
 
+def get_language_name(lang_code):
+    """언어 코드로부터 언어 이름 반환"""
+    return LANGUAGE_CODES.get(lang_code, lang_code)
+
 def main():
     # API 키 입력 받기
     api_key = input("OpenAI API 키를 입력하세요: ").strip()
@@ -409,16 +294,14 @@ def main():
         print("파일을 찾을 수 없습니다.")
         return
     
-    # 언어 선택 드롭다운 메뉴
-    print("\n원본 언어를 선택하세요:")
-    source_lang = select_language("원본 언어 선택", "ko")  # 기본값으로 한국어 설정
-    
-    print("\n대상 언어를 선택하세요:")
-    target_lang = select_language("대상 언어 선택", "en")  # 기본값으로 영어 설정
+    # 언어 코드 직접 입력
+    print("\n지원되는 언어 코드 예시: ko (한국어), en (영어), ja (일본어), zh (중국어), fr (프랑스어), es (스페인어), de (독일어)")
+    source_lang = input("원본 언어 코드를 입력하세요: ").strip().lower()
+    target_lang = input("대상 언어 코드를 입력하세요: ").strip().lower()
 
     # 선택된 언어 코드에 해당하는 언어 이름 찾기
-    source_lang_name = next((name for code, name in SUPPORTED_LANGUAGES if code == source_lang), source_lang)
-    target_lang_name = next((name for code, name in SUPPORTED_LANGUAGES if code == target_lang), target_lang)
+    source_lang_name = get_language_name(source_lang)
+    target_lang_name = get_language_name(target_lang)
     
     # 출력 파일 이름 설정
     output_file = os.path.splitext(input_file)[0] + f"_translated_{target_lang}{os.path.splitext(input_file)[1]}"
